@@ -1,0 +1,490 @@
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="sidebar-brand">Financial Approval System</div>
+    <nav>
+      <button [class.active]="activePage === 'employee'" (click)="selectPage('employee')">Employee Portal</button>
+      <button [class.active]="activePage === 'tracking'" (click)="selectPage('tracking')">Track Request</button>
+      <button [class.active]="activePage === 'approver'" (click)="selectPage('approver')">Approver Portal</button>
+      <button [class.active]="activePage === 'reports'" (click)="selectPage('reports')">Reports</button>
+      <button [class.active]="activePage === 'users'" (click)="selectPage('users')">User Management</button>
+    </nav>
+    @if (dashboardStats) {
+      <div class="sidebar-stats">
+        <div class="ss-item"><span>Total</span><strong>{{ dashboardStats.total }}</strong></div>
+        <div class="ss-item"><span>Pending</span><strong>{{ dashboardStats.pending }}</strong></div>
+        <div class="ss-item"><span>Approved</span><strong>{{ dashboardStats.approved }}</strong></div>
+        <div class="ss-item"><span>Rejected</span><strong>{{ dashboardStats.rejected }}</strong></div>
+      </div>
+    }
+  </aside>
+
+  <div class="main">
+
+    @if (activePage === 'employee') {
+      <div class="page-title">
+        <h2>Submit Financial Request</h2>
+        <p>Fill out the form to create a new request for approval.</p>
+      </div>
+      <div class="card">
+        <form (ngSubmit)="createRequest()">
+          <div class="form-row">
+            <div class="field">
+              <label>Your Name</label>
+              <input name="requestedBy" [(ngModel)]="newRequest.requestedBy" placeholder="Enter your full name" required />
+            </div>
+            <div class="field">
+              <label>Request Type</label>
+              <select name="requestType" [(ngModel)]="newRequest.requestType" required>
+                <option value="EXPENSE">Expense</option>
+                <option value="PURCHASE">Purchase</option>
+                <option value="TRAVEL">Travel</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label>Amount (Rs.)</label>
+            <input name="amount" type="number" min="0.01" step="0.01"
+                   [(ngModel)]="newRequest.amount" placeholder="0.00" required />
+            @if (newRequest.amount > 0) {
+              <small class="hint">{{ approvalLevelLabel(newRequest.amount) }}</small>
+            }
+          </div>
+          <div class="field">
+            <label>Description</label>
+            <textarea name="description" rows="3"
+                      [(ngModel)]="newRequest.description"
+                      placeholder="Explain the purpose of this request" required></textarea>
+          </div>
+          <div class="form-footer">
+            <button type="submit" class="btn-primary" [disabled]="submitting">
+              {{ submitting ? 'Submitting...' : 'Submit for Approval' }}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card info-tiers">
+        <h3>Approval Tiers</h3>
+        <table class="tier-table">
+          <thead><tr><th>Amount</th><th>Required Approvals</th></tr></thead>
+          <tbody>
+            <tr><td>Below Rs.10,000</td><td>Manager</td></tr>
+            <tr><td>Rs.10,000 to Rs.50,000</td><td>Manager + Finance</td></tr>
+            <tr><td>Above Rs.50,000</td><td>Manager + Finance + Director</td></tr>
+          </tbody>
+        </table>
+      </div>
+    }
+
+    @if (showReference) {
+      <div class="overlay" (click)="showReference = false">
+        <div class="dialog" (click)="$event.stopPropagation()">
+          <h3>Request Submitted</h3>
+          <p>Your request has been submitted successfully.</p>
+          <label>Reference Number</label>
+          <div class="ref-row">
+            <code>{{ createdReferenceNumber }}</code>
+            <button type="button" class="btn-sm" (click)="copyReferenceNumber()">Copy</button>
+          </div>
+          <p class="note">Save this number to track your request status.</p>
+          <button class="btn-primary" (click)="showReference = false">Close</button>
+        </div>
+      </div>
+    }
+
+    @if (activePage === 'tracking') {
+      <div class="page-title">
+        <h2>Track Request</h2>
+        <p>Enter your reference number to check the current status.</p>
+      </div>
+      <div class="card">
+        <form (ngSubmit)="trackRequest()" class="search-row">
+          <input name="trackNum" [(ngModel)]="trackRequestNumber"
+                 placeholder="e.g. REQ-20261027092732125-8" />
+          <button type="submit" class="btn-primary">Search</button>
+        </form>
+
+        @if (trackingSearched) {
+          @if (trackedRequest) {
+            <div class="result-box">
+              <table class="detail-table">
+                <tr><th>Reference No.</th><td>{{ trackedRequest.request_number }}</td></tr>
+                <tr><th>Type</th><td>{{ trackedRequest.request_type }}</td></tr>
+                <tr><th>Requested By</th><td>{{ trackedRequest.requested_by }}</td></tr>
+                <tr><th>Amount</th><td>{{ trackedRequest.amount | currency:'INR':'symbol':'1.0-2' }}</td></tr>
+                <tr><th>Status</th><td><span [class]="'status ' + statusClass(trackedRequest.status)">{{ formatStatus(trackedRequest.status) }}</span></td></tr>
+                <tr><th>Description</th><td>{{ trackedRequest.description }}</td></tr>
+                <tr><th>Date</th><td>{{ trackedRequest.updated_at | date:'medium' }}</td></tr>
+              </table>
+              @if (trackedRequest.status === 'REJECTED' && trackedRequest.rejection_reason) {
+                <div class="rejection-box">
+                  <strong>Rejection Reason:</strong> {{ trackedRequest.rejection_reason }}
+                </div>
+              }
+              @if (trackedHistory.length > 0) {
+                <div class="history-block">
+                  <h4>Approval History</h4>
+                  <table class="data-table">
+                    <thead><tr><th>Level</th><th>Role</th><th>Approver</th><th>Action</th><th>Date</th><th>Reason</th></tr></thead>
+                    <tbody>
+                      @for (h of trackedHistory; track h.id) {
+                        <tr>
+                          <td>{{ levelLabel(h.approval_level) }}</td>
+                          <td>{{ h.approver_role }}</td>
+                          <td>{{ h.approver_name }}</td>
+                          <td><span [class]="'status ' + (h.action === 'APPROVED' ? 'approved' : 'rejected')">{{ h.action }}</span></td>
+                          <td>{{ h.created_at | date:'short' }}</td>
+                          <td>{{ h.rejection_reason || '-' }}</td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              }
+            </div>
+          } @else {
+            <p class="no-result">No request found with that reference number.</p>
+          }
+        }
+      </div>
+    }
+
+    @if (activePage === 'approver' && !approverLoggedIn) {
+      <div class="page-title">
+        <h2>Approver Login</h2>
+        <p>Sign in with your credentials to access the approval queue.</p>
+      </div>
+      <div class="card login-card">
+        <div class="demo-box">
+          <strong>Demo Accounts</strong>
+          <table class="demo-table">
+            <thead><tr><th>Name</th><th>Password</th><th>Role</th></tr></thead>
+            <tbody>
+              <tr><td>Manager User</td><td>1234</td><td>MANAGER</td></tr>
+              <tr><td>Finance User</td><td>1234</td><td>FINANCE</td></tr>
+              <tr><td>Director User</td><td>1234</td><td>DIRECTOR</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <form (ngSubmit)="loginApprover()">
+          <div class="field">
+            <label>Name</label>
+            <input name="approverName" [(ngModel)]="approverName" placeholder="e.g. Manager User" required />
+          </div>
+          <div class="field">
+            <label>Password</label>
+            <input name="approverPwd" type="password" [(ngModel)]="approverPassword" placeholder="Password" required />
+          </div>
+          @if (approverLoginError) {
+            <p class="error-msg">{{ approverLoginError }}</p>
+          }
+          <div class="form-footer">
+            <button type="submit" class="btn-primary">Login</button>
+          </div>
+        </form>
+      </div>
+    }
+
+    @if (activePage === 'approver' && approverLoggedIn) {
+      <div class="page-title">
+        <div class="title-row">
+          <div>
+            <h2>Approver Dashboard</h2>
+            <p>Logged in as <strong>{{ approverName }}</strong> &mdash; Role: <strong>{{ approverRole }}</strong></p>
+          </div>
+          <button class="btn-outline" (click)="logoutApprover()">Logout</button>
+        </div>
+      </div>
+
+      @if (dashboardStats) {
+        <div class="stats-row">
+          <div class="stat"><p>Total</p><h3>{{ dashboardStats.total }}</h3></div>
+          <div class="stat"><p>Pending</p><h3>{{ dashboardStats.pending }}</h3></div>
+          <div class="stat"><p>Approved</p><h3>{{ dashboardStats.approved }}</h3></div>
+          <div class="stat"><p>Rejected</p><h3>{{ dashboardStats.rejected }}</h3></div>
+          <div class="stat"><p>Total Value</p><h3>{{ dashboardStats.total_amount | currency:'INR':'symbol':'1.0-0' }}</h3></div>
+        </div>
+      }
+
+      <div class="card">
+        <h3>Filter Requests</h3>
+        <div class="filter-row">
+          <div class="field">
+            <label>Status</label>
+            <select [(ngModel)]="filterStatus">
+              <option value="">All</option>
+              <option value="PENDING_APPROVAL">Pending</option>
+              <option value="APPROVED">Approved</option>
+              <option value="REJECTED">Rejected</option>
+              <option value="DRAFT">Draft</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Type</label>
+            <select [(ngModel)]="filterType">
+              <option value="">All</option>
+              <option value="EXPENSE">Expense</option>
+              <option value="PURCHASE">Purchase</option>
+              <option value="TRAVEL">Travel</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Requested By</label>
+            <input [(ngModel)]="filterRequestedBy" placeholder="Search name..." />
+          </div>
+          <div class="filter-btns">
+            <button class="btn-primary" (click)="applyFilters()">Apply</button>
+            <button class="btn-outline" (click)="clearFilters()">Clear</button>
+          </div>
+        </div>
+      </div>
+
+      @if (pendingForRole.length > 0) {
+        <div class="card">
+          <h3>Pending Your Approval ({{ pendingForRole.length }})</h3>
+          <p>These requests require your action as <strong>{{ approverRole }}</strong>.</p>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Reference</th>
+                  <th>Employee</th>
+                  <th>Type</th>
+                  <th>Amount</th>
+                  <th>Description</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (req of pendingForRole; track req.id) {
+                  <tr>
+                    <td class="mono">{{ req.request_number }}</td>
+                    <td>{{ req.requested_by }}</td>
+                    <td>{{ req.request_type }}</td>
+                    <td>{{ req.amount | currency:'INR':'symbol':'1.0-2' }}</td>
+                    <td>{{ req.description }}</td>
+                    <td>
+                      <div class="action-btns">
+                        <button class="btn-approve" (click)="approveRequest(req)">Approve</button>
+                        <button class="btn-reject" (click)="openRejectModal(req)">Reject</button>
+                        <button class="btn-sm" (click)="viewHistory(req)">History</button>
+                      </div>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+      } @else {
+        <div class="card empty-card">
+          <p>No requests pending your approval as <strong>{{ approverRole }}</strong>.</p>
+        </div>
+      }
+
+      <div class="card">
+        <h3>All Requests ({{ requests.length }})</h3>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Reference</th>
+                <th>Employee</th>
+                <th>Type</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Level</th>
+                <th>Date</th>
+                <th>History</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (req of requests; track req.id) {
+                <tr>
+                  <td class="mono">{{ req.request_number }}</td>
+                  <td>{{ req.requested_by }}</td>
+                  <td>{{ req.request_type }}</td>
+                  <td>{{ req.amount | currency:'INR':'symbol':'1.0-2' }}</td>
+                  <td><span [class]="'status ' + statusClass(req.status)">{{ formatStatus(req.status) }}</span></td>
+                  <td>
+                    @if (req.status === 'PENDING_APPROVAL') {
+                      {{ roleForLevel(req.current_approval_level) }}
+                    } @else { - }
+                  </td>
+                  <td>{{ req.created_at | date:'shortDate' }}</td>
+                  <td><button class="btn-sm" (click)="viewHistory(req)">View</button></td>
+                </tr>
+              } @empty {
+                <tr><td colspan="8" class="empty-cell">No requests found.</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    }
+
+    @if (activePage === 'history' && selectedRequest) {
+      <div class="page-title">
+        <button class="btn-back" (click)="backFromHistory()">Back</button>
+        <h2>Approval History</h2>
+        <p>{{ selectedRequest.request_number }}</p>
+      </div>
+      <div class="card">
+        <table class="detail-table">
+          <tr><th>Type</th><td>{{ selectedRequest.request_type }}</td></tr>
+          <tr><th>Requested By</th><td>{{ selectedRequest.requested_by }}</td></tr>
+          <tr><th>Amount</th><td>{{ selectedRequest.amount | currency:'INR':'symbol':'1.0-2' }}</td></tr>
+          <tr><th>Status</th><td><span [class]="'status ' + statusClass(selectedRequest.status)">{{ formatStatus(selectedRequest.status) }}</span></td></tr>
+          <tr><th>Description</th><td>{{ selectedRequest.description }}</td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <h3>Approval Chain</h3>
+        @if (historyLoading) {
+          <p>Loading...</p>
+        } @else {
+          <table class="data-table">
+            <thead>
+              <tr><th>Step</th><th>Role</th><th>Approver</th><th>Action</th><th>Date</th><th>Reason</th></tr>
+            </thead>
+            <tbody>
+              @for (level of requiredLevels(selectedRequest.amount); track level; let i = $index) {
+                @let h = historyForLevel(i + 1);
+                <tr>
+                  <td>{{ levelLabel(i + 1) }}</td>
+                  <td>{{ level }}</td>
+                  <td>{{ h?.approver_name || '-' }}</td>
+                  <td>
+                    @if (h) {
+                      <span [class]="'status ' + (h.action === 'APPROVED' ? 'approved' : 'rejected')">{{ h.action }}</span>
+                    } @else {
+                      <span class="status pending">Pending</span>
+                    }
+                  </td>
+                  <td>{{ h ? (h.created_at | date:'short') : '-' }}</td>
+                  <td>{{ h?.rejection_reason || '-' }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        }
+      </div>
+    }
+
+    @if (activePage === 'reports') {
+      <div class="page-title">
+        <h2>Amount-Based Reports</h2>
+        <p>Breakdown of requests by approval tier.</p>
+      </div>
+
+      @if (dashboardStats) {
+        <div class="stats-row">
+          <div class="stat"><p>Total Requests</p><h3>{{ dashboardStats.total }}</h3></div>
+          <div class="stat"><p>Total Value</p><h3>{{ dashboardStats.total_amount | currency:'INR':'symbol':'1.0-0' }}</h3></div>
+          <div class="stat"><p>Approved Value</p><h3>{{ dashboardStats.approved_amount | currency:'INR':'symbol':'1.0-0' }}</h3></div>
+          <div class="stat"><p>Pending Value</p><h3>{{ dashboardStats.pending_amount | currency:'INR':'symbol':'1.0-0' }}</h3></div>
+        </div>
+      }
+
+      <div class="card">
+        <table class="data-table">
+          <thead>
+            <tr><th>Tier</th><th>Description</th><th>Total</th><th>Approved</th><th>Pending</th><th>Rejected</th><th>Total Value</th></tr>
+          </thead>
+          <tbody>
+            @for (rep of amountReports; track rep.tier) {
+              <tr>
+                <td>{{ rep.tier | uppercase }}</td>
+                <td>{{ rep.label }}</td>
+                <td>{{ rep.total }}</td>
+                <td>{{ rep.approved }}</td>
+                <td>{{ rep.pending }}</td>
+                <td>{{ rep.rejected }}</td>
+                <td>{{ rep.total_amount | currency:'INR':'symbol':'1.0-0' }}</td>
+              </tr>
+            } @empty {
+              <tr><td colspan="7" class="empty-cell">No data available.</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+
+    @if (activePage === 'users') {
+      <div class="page-title">
+        <h2>User Management</h2>
+        <p>Add new users and manage roles.</p>
+      </div>
+
+      <div class="card">
+        <h3>Add New User</h3>
+        <form (ngSubmit)="addUser()">
+          <div class="form-row">
+            <div class="field">
+              <label>Full Name</label>
+              <input name="userName" [(ngModel)]="newUser.name" placeholder="Enter name" required />
+            </div>
+            <div class="field">
+              <label>Role</label>
+              <select name="userRole" [(ngModel)]="newUser.role">
+                <option value="EMPLOYEE">Employee</option>
+                <option value="MANAGER">Manager</option>
+                <option value="FINANCE">Finance</option>
+                <option value="DIRECTOR">Director</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Password</label>
+              <input name="userPwd" type="password" [(ngModel)]="newUser.password" placeholder="Set password" required />
+            </div>
+          </div>
+          <div class="form-footer">
+            <button type="submit" class="btn-primary">Add User</button>
+          </div>
+          @if (userMessage) { <p class="success-msg">{{ userMessage }}</p> }
+          @if (userError) { <p class="error-msg">{{ userError }}</p> }
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>Registered Users ({{ users.length }})</h3>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>#</th><th>Name</th><th>Role</th></tr></thead>
+            <tbody>
+              @for (u of users; track u.id) {
+                <tr>
+                  <td>{{ u.id }}</td>
+                  <td>{{ u.name }}</td>
+                  <td>{{ u.role }}</td>
+                </tr>
+              } @empty {
+                <tr><td colspan="3" class="empty-cell">No users found.</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    }
+
+  </div>
+</div>
+
+@if (showRejectModal && rejectTarget) {
+  <div class="overlay" (click)="closeRejectModal()">
+    <div class="dialog" (click)="$event.stopPropagation()">
+      <h3>Reject Request</h3>
+      <p>Reference: <strong>{{ rejectTarget.request_number }}</strong></p>
+      <div class="field">
+        <label>Rejection Reason <span class="req">*</span></label>
+        <textarea name="rejectReason" rows="3" [(ngModel)]="rejectionReason"
+                  placeholder="Enter the reason for rejection"></textarea>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn-reject" (click)="confirmReject()">Confirm Reject</button>
+        <button class="btn-outline" (click)="closeRejectModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+}
